@@ -23,7 +23,7 @@ var chat_token = "chat"
 type Message struct {
 	Name  string `json:"name"`
 	Text  string `json:"text"`
-	Image string `json:"image"` // New field for image URL
+	Image string `json:"image"`
 	Time  string `json:"time"`
 }
 
