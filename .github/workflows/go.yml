@@ -1,7 +1,7 @@
-# This workflow will build a golang project
+# This workflow builds binaries for Linux and Windows, packages them, and creates a GitHub release
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
 
-name: Go
+name: Build and Release
 
 on:
   push:
@@ -10,9 +10,12 @@ on:
     branches: [ "main" ]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, windows]
+        goarch: [amd64]
     steps:
     - uses: actions/checkout@v4
 
@@ -21,5 +24,103 @@ jobs:
       with:
         go-version: '1.18'
 
-    - name: Build
-      run: go build -v ./main.go
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        if [ "$GOOS" = "windows" ]; then
+          go build -o kisschat.exe ./main.go
+        else
+          go build -o kisschat ./main.go
+        fi
+
+    - name: Package Linux binary
+      if: matrix.goos == 'linux'
+      run: |
+        tar -czf kisschat-linux-amd64.tar.gz kisschat
+        
+    - name: Package Windows binary
+      if: matrix.goos == 'windows'
+      run: |
+        zip kisschat-windows-amd64.zip kisschat.exe
+
+    - name: Upload Linux artifact
+      if: matrix.goos == 'linux'
+      uses: actions/upload-artifact@v3
+      with:
+        name: kisschat-linux-amd64
+        path: kisschat-linux-amd64.tar.gz
+
+    - name: Upload Windows artifact
+      if: matrix.goos == 'windows'
+      uses: actions/upload-artifact@v3
+      with:
+        name: kisschat-windows-amd64
+        path: kisschat-windows-amd64.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download Linux artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: kisschat-linux-amd64
+        path: ./artifacts
+
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: kisschat-windows-amd64
+        path: ./artifacts
+
+    - name: Generate release tag
+      id: tag
+      run: |
+        TAG="v$(date +'%Y%m%d-%H%M%S')-$(echo $GITHUB_SHA | head -c7)"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "Generated tag: $TAG"
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        release_name: Release ${{ steps.tag.outputs.tag }}
+        body: |
+          Automated release from commit ${{ github.sha }}
+          
+          ## Changes
+          - Latest changes from main branch
+          
+          ## Download
+          - Linux: kisschat-linux-amd64.tar.gz
+          - Windows: kisschat-windows-amd64.zip
+        draft: false
+        prerelease: false
+
+    - name: Upload Linux Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/kisschat-linux-amd64.tar.gz
+        asset_name: kisschat-linux-amd64.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload Windows Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./artifacts/kisschat-windows-amd64.zip
+        asset_name: kisschat-windows-amd64.zip
+        asset_content_type: application/zip
